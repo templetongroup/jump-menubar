@@ -47,3 +47,16 @@ Installed footprint on target Macs:
 - `/usr/local/jumpmenu/` (plugin source + helpers)
 - `~/Documents/SwiftBar/` (active plugin + generated icon)
 - `~/Library/LaunchAgents/com.templeton.jumpmenu.plist`
+
+## Machine status dots
+
+Where Tailscale is installed, online status comes from `tailscale
+status` — authoritative across networks, no probing. Jump machine
+names are matched to tailscale hostnames automatically; for names
+that differ or collide, add lines to `~/JumpMenu/tailscale-names.txt`:
+
+    Jump Name|tailscale-hostname
+    Some Machine|-        (dash = not on tailscale)
+
+Machines without a tailscale match fall back to a direct network
+probe if they have an address, otherwise show a white "unknown" dot.

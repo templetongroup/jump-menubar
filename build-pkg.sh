@@ -2,7 +2,7 @@
 # build-pkg.sh — builds signed + notarized Jump Menubar installer (Templeton Group)
 set -e
 
-VERSION="1.1"
+VERSION="1.2"
 IDENTIFIER="com.templeton.jumpmenu"
 NOTARY_PROFILE="templeton-notary"
 
@@ -50,6 +50,7 @@ SEARCH_DIRS=(
   "$HOME/Library/Containers/com.p5sys.jump.mac.viewer.web/Data"
   "$HOME/Library/Application Support/Jump Desktop"
 )
+MAP="$HOME/JumpMenu/tailscale-names.txt"
 
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
@@ -78,28 +79,91 @@ done | while IFS= read -r f; do
   host=$(printf '%s' "$info" | cut -f2)
   port=$(printf '%s' "$info" | cut -f3)
   [ -z "$name" ] && name=$(basename "$f" .jump)
+  name=$(printf '%s' "$name" | sed 's/[[:space:]]*$//')
+  [ -z "$host" ] && host="-"
+  [ -z "$port" ] && port="-"
   printf '%s\t%s\t%s\t%s\n' "$name" "$f" "$host" "$port"
 done > "$TMP/raw"
 
 sort -f "$TMP/raw" | awk -F'\t' '!seen[tolower($1)]++' > "$TMP/list"
+
+# Authoritative status from tailscale where possible
+TS_BIN=""
+command -v tailscale >/dev/null 2>&1 && TS_BIN="tailscale"
+[ -z "$TS_BIN" ] && [ -x "/Applications/Tailscale.app/Contents/MacOS/Tailscale" ] && TS_BIN="/Applications/Tailscale.app/Contents/MacOS/Tailscale"
+if [ -n "$TS_BIN" ]; then
+  "$TS_BIN" status --json > "$TMP/ts.json" 2>/dev/null || true
+fi
+touch "$TMP/ts.json"
+
+/usr/bin/osascript -l JavaScript - "$TMP/list" "$MAP" "$TMP/ts.json" <<'JXA' > "$TMP/tstatus" 2>/dev/null
+function run(argv) {
+  ObjC.import("Foundation");
+  function read(p){var s=$.NSString.stringWithContentsOfFileEncodingError(p,$.NSUTF8StringEncoding,null);return s?ObjC.unwrap(s):"";}
+  function norm(x){return x.toLowerCase().replace(/[^a-z0-9]/g,"");}
+  var list = read(argv[0]).split("\n").filter(function(l){return l;});
+  var map = {};
+  read(argv[1]).split("\n").forEach(function(l){
+    if (l.indexOf("#") === 0) return;
+    var i = l.indexOf("|");
+    if (i > 0) map[norm(l.slice(0,i))] = l.slice(i+1).trim();
+  });
+  var peers = {};
+  try {
+    var ts = JSON.parse(read(argv[2]));
+    var P = ts.Peer || {};
+    Object.keys(P).forEach(function(k){
+      var p = P[k];
+      if (p.HostName) { var h = norm(p.HostName); if (peers[h] === undefined) peers[h] = p.Online ? 1 : 0; }
+    });
+    Object.keys(P).forEach(function(k){
+      var p = P[k];
+      if (p.DNSName) peers[norm(p.DNSName.split(".")[0])] = p.Online ? 1 : 0;
+    });
+  } catch(e) {}
+  var out = [];
+  list.forEach(function(line){
+    var name = line.split("\t")[0];
+    var nn = norm(name);
+    var target = null;
+    if (map[nn] !== undefined) { target = (map[nn] === "-") ? null : norm(map[nn]); }
+    else if (peers[nn] !== undefined) { target = nn; }
+    else {
+      var hits = Object.keys(peers).filter(function(p){ return p.indexOf(nn) >= 0 || nn.indexOf(p) >= 0; });
+      if (hits.length === 1) target = hits[0];
+    }
+    if (target !== null && peers[target] !== undefined) out.push(name + "\t" + (peers[target] ? "O" : "X"));
+    else out.push(name + "\tN");
+  });
+  return out.join("\n");
+}
+JXA
 
 if [ ! -s "$TMP/list" ]; then
   echo "No machines found | color=gray"
   echo "In Jump Desktop: File > Export to Desktop, | color=gray"
   echo "then click Import below. | color=gray"
 else
+  # Fallback probes only for machines tailscale couldn't answer
   n=0
   while IFS=$'\t' read -r name path host port; do
     n=$((n+1))
-    {
-      if [ -z "$host" ]; then
-        echo "U"
-      elif [ -n "$port" ]; then
-        nc -z -G 1 "$host" "$port" >/dev/null 2>&1 && echo "O" || echo "X"
-      else
-        ping -c 1 -t 1 "$host" >/dev/null 2>&1 && echo "O" || echo "X"
-      fi
-    } > "$TMP/st.$n" &
+    [ "$host" = "-" ] && host=""
+    [ "$port" = "-" ] && port=""
+    ts=$(grep -F "$name	" "$TMP/tstatus" 2>/dev/null | head -1 | cut -f2)
+    if [ "$ts" = "O" ] || [ "$ts" = "X" ]; then
+      echo "$ts" > "$TMP/st.$n"
+    else
+      {
+        if [ -z "$host" ]; then
+          echo "U"
+        elif [ -n "$port" ]; then
+          nc -z -G 1 "$host" "$port" >/dev/null 2>&1 && echo "O" || echo "X"
+        else
+          ping -c 1 -t 1 "$host" >/dev/null 2>&1 && echo "O" || echo "X"
+        fi
+      } > "$TMP/st.$n" &
+    fi
   done < "$TMP/list"
   wait
   n=0
