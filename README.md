@@ -1,6 +1,8 @@
 # Jump Desktop Menubar
 The Templeton Group
 
+
+Unofficial tool — not affiliated with or endorsed by Jump Desktop / p5sys.
 A macOS menubar for Jump Desktop: lists every machine with a live
 status dot — click to connect. White Jump icon, starts at login.
 
