@@ -2,7 +2,7 @@
 # build-pkg.sh — builds signed + notarized Jump Menubar installer (Templeton Group)
 set -e
 
-VERSION="1.0"
+VERSION="1.1"
 IDENTIFIER="com.templeton.jumpmenu"
 NOTARY_PROFILE="templeton-notary"
 
@@ -229,6 +229,20 @@ cat > "$HOME/Library/LaunchAgents/com.templeton.jumpmenu.plist" <<'LA'
 </plist>
 LA
 open -a SwiftBar
+count=$(find "$HOME/JumpMenu" "$HOME/Library/Containers/com.p5sys.jump.mac.viewer/Data" "$HOME/Library/Containers/com.p5sys.jump.mac.viewer.web/Data" "$HOME/Library/Application Support/Jump Desktop" -type f -name "*.jump" 2>/dev/null | wc -l | tr -d ' ')
+if [ "$count" -eq 0 ]; then
+  btn=$(osascript <<'OSA' 2>/dev/null
+display dialog "Jump Menubar is installed, but no machines were found on this Mac yet.
+
+Machines synced through your Jump account need a one-time export:
+
+1. Open Jump Desktop
+2. Click File > Export and save to the Desktop
+3. Click the Jump icon in the menubar, then 'Import Jump export from Desktop'" buttons {"Later", "Open Jump Desktop"} default button "Open Jump Desktop" with title "Jump Menubar" with icon note
+OSA
+)
+  case "$btn" in *"Open Jump Desktop"*) open -a "Jump Desktop" || true ;; esac
+fi
 USER_EOF
 chmod +x "$SUPPORT/user-setup.sh"
 
@@ -244,10 +258,50 @@ POST_EOF
 chmod +x "$SCRIPTS/postinstall"
 
 OUT="$HOME/Desktop/JumpMenubar-$VERSION.pkg"
-echo "== Building and signing pkg..."
+echo "== Building component package..."
 pkgbuild --root "$PAYLOAD" --scripts "$SCRIPTS" \
   --identifier "$IDENTIFIER" --version "$VERSION" \
-  --install-location / --sign "$SIGN_ID" "$OUT"
+  --install-location / "$WORK/component.pkg"
+
+RES="$WORK/resources"
+mkdir -p "$RES"
+cat > "$RES/conclusion.html" <<'HTML_EOF'
+<!DOCTYPE html><html><head><meta charset="utf-8"><style>
+body{font-family:-apple-system,Helvetica,Arial,sans-serif;font-size:13px;color:#333;padding:0 10px}
+h2{font-size:16px;margin-bottom:6px}
+.box{background:#f5f5f7;border-radius:8px;padding:10px 14px;margin:12px 0}
+</style></head><body>
+<h2>Jump Desktop Menubar is installed</h2>
+<p>Look for the Jump icon in the menubar at the top-right of the screen.
+Click it to see your machines &mdash; a green dot means the machine is
+responding. Click any machine to connect. The menubar starts
+automatically at login.</p>
+<div class="box"><b>Menu empty or machines missing?</b><br>
+Machines synced through your Jump account need a one-time export:<br>
+1. Open <b>Jump Desktop</b><br>
+2. Click <b>File &gt; Export</b> and save to the <b>Desktop</b><br>
+3. Click the Jump menubar icon &gt; <b>Import Jump export from Desktop</b>
+</div>
+</body></html>
+HTML_EOF
+
+cat > "$WORK/distribution.xml" <<DIST_EOF
+<?xml version="1.0" encoding="utf-8"?>
+<installer-gui-script minSpecVersion="1">
+  <title>Jump Desktop Menubar $VERSION</title>
+  <conclusion file="conclusion.html"/>
+  <options customize="never" require-scripts="false"/>
+  <choices-outline><line choice="default"><line choice="$IDENTIFIER"/></line></choices-outline>
+  <choice id="default"/>
+  <choice id="$IDENTIFIER" visible="false"><pkg-ref id="$IDENTIFIER"/></choice>
+  <pkg-ref id="$IDENTIFIER" version="$VERSION" onConclusion="none">component.pkg</pkg-ref>
+</installer-gui-script>
+DIST_EOF
+
+echo "== Wrapping and signing installer..."
+productbuild --distribution "$WORK/distribution.xml" \
+  --package-path "$WORK" --resources "$RES" \
+  --sign "$SIGN_ID" "$OUT"
 
 echo "== Submitting to Apple for notarization (usually 1-5 minutes)..."
 xcrun notarytool submit "$OUT" --keychain-profile "$NOTARY_PROFILE" --wait
