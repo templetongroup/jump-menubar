@@ -2,7 +2,7 @@
 # build-pkg.sh — builds signed + notarized Jump Menubar installer (Templeton Group)
 set -e
 
-VERSION="1.2.1"
+VERSION="1.2.2"
 IDENTIFIER="com.templeton.jumpmenu"
 NOTARY_PROFILE="templeton-notary"
 
@@ -38,17 +38,16 @@ cat > "$SUPPORT/jumpmachines.10s.sh" <<'PLUGIN_EOF'
 
 ICON="$HOME/Documents/SwiftBar/.jumpicon.png"
 if [ -s "$ICON" ]; then
-  echo "| templateImage=$(/usr/bin/base64 -i "$ICON") width=16 height=16"
+  echo "| templateImage=$(/usr/bin/base64 -i "$ICON")"
 else
-  echo "| sfimage=display symbolize=true width=16 height=16"
+  echo "| sfimage=display symbolize=true"
 fi
 echo "---"
 
+# The app sandbox can block directory enumeration indefinitely on macOS 26.
+# The Jump export is small, stable, and is the supported machine source.
 SEARCH_DIRS=(
   "$HOME/JumpMenu"
-  "$HOME/Library/Containers/com.p5sys.jump.mac.viewer/Data"
-  "$HOME/Library/Containers/com.p5sys.jump.mac.viewer.web/Data"
-  "$HOME/Library/Application Support/Jump Desktop"
 )
 MAP="$HOME/JumpMenu/tailscale-names.txt"
 
@@ -205,7 +204,10 @@ var ws = $.NSWorkspace.sharedWorkspace;
 var app = ws.URLForApplicationWithBundleIdentifier('com.p5sys.jump.mac.viewer');
 var path = (app && !app.isNil()) ? app.path : $('/Applications/Jump Desktop.app');
 var icon = ws.iconForFile(path);
-var S = 36;
+// SwiftBar renders bitmap pixels at their intrinsic point size. Generate a
+// standard menu-bar-sized template instead of relying on unsupported
+// width/height output parameters.
+var S = 22;
 icon.size = $.NSMakeSize(S, S);
 function newRep() {
   return $.NSBitmapImageRep.alloc.initWithBitmapDataPlanesPixelsWidePixelsHighBitsPerSampleSamplesPerPixelHasAlphaIsPlanarColorSpaceNameBytesPerRowBitsPerPixel(null, S, S, 8, 4, true, false, $.NSCalibratedRGBColorSpace, 0, 0);
@@ -293,7 +295,19 @@ cat > "$HOME/Library/LaunchAgents/com.templeton.jumpmenu.plist" <<'LA'
 </plist>
 LA
 open -a SwiftBar
-count=$(find "$HOME/JumpMenu" "$HOME/Library/Containers/com.p5sys.jump.mac.viewer/Data" "$HOME/Library/Containers/com.p5sys.jump.mac.viewer.web/Data" "$HOME/Library/Application Support/Jump Desktop" -type f -name "*.jump" 2>/dev/null | wc -l | tr -d ' ')
+os_major=$(/usr/bin/sw_vers -productVersion | /usr/bin/cut -d. -f1)
+if [ "${os_major:-0}" -ge 26 ]; then
+  visibility_btn=$(osascript <<'OSA' 2>/dev/null
+display dialog "Jump Menubar is installed, but macOS 26 hides newly installed menu-bar apps until you allow them.
+
+In System Settings > Menu Bar, turn on SwiftBar under ‘Allow in the Menu Bar.’ This is required even when the menu bar has plenty of room." buttons {"Later", "Open Menu Bar Settings"} default button "Open Menu Bar Settings" with title "Finish Jump Menubar Setup" with icon note
+OSA
+)
+  case "$visibility_btn" in
+    *"Open Menu Bar Settings"*) open "x-apple.systempreferences:com.apple.ControlCenter-Settings.extension" || true ;;
+  esac
+fi
+count=$(find "$HOME/JumpMenu" -type f -name "*.jump" 2>/dev/null | wc -l | tr -d ' ')
 if [ "$count" -eq 0 ]; then
   btn=$(osascript <<'OSA' 2>/dev/null
 display dialog "Jump Menubar is installed, but no machines were found on this Mac yet.
@@ -340,6 +354,12 @@ h2{font-size:16px;margin-bottom:6px}
 Click it to see your machines &mdash; a green dot means the machine is
 responding. Click any machine to connect. The menubar starts
 automatically at login.</p>
+<div class="box"><b>Using macOS 26?</b><br>
+macOS hides newly installed menu-bar apps by default. Open
+<b>System Settings &gt; Menu Bar</b> and turn on <b>SwiftBar</b> under
+<b>Allow in the Menu Bar</b>. This is required even when there is plenty
+of room in the menu bar.
+</div>
 <div class="box"><b>Menu empty or machines missing?</b><br>
 Machines synced through your Jump account need a one-time export:<br>
 1. Open <b>Jump Desktop</b><br>
