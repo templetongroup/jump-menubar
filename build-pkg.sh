@@ -2,7 +2,7 @@
 # build-pkg.sh — builds signed + notarized Jump Menubar installer (Templeton Group)
 set -e
 
-VERSION="1.2"
+VERSION="1.2.1"
 IDENTIFIER="com.templeton.jumpmenu"
 NOTARY_PROFILE="templeton-notary"
 
@@ -38,9 +38,9 @@ cat > "$SUPPORT/jumpmachines.10s.sh" <<'PLUGIN_EOF'
 
 ICON="$HOME/Documents/SwiftBar/.jumpicon.png"
 if [ -s "$ICON" ]; then
-  echo "| templateImage=$(/usr/bin/base64 -i "$ICON")"
+  echo "| templateImage=$(/usr/bin/base64 -i "$ICON") width=16 height=16"
 else
-  echo "| sfimage=display symbolize=true"
+  echo "| sfimage=display symbolize=true width=16 height=16"
 fi
 echo "---"
 
