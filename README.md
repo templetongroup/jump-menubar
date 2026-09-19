@@ -18,9 +18,18 @@ Runs on SwiftBar (MIT), which the installer bundles automatically.
 Copy `JumpMenubar-<version>.pkg` to the Mac, double-click, Install.
 The pkg is signed and notarized — no Gatekeeper prompts.
 
+On macOS 26, Apple hides newly installed menu-bar apps by default.
+The installer opens the correct settings page; turn on **SwiftBar**
+under **System Settings > Menu Bar > Allow in the Menu Bar**. This is
+required even when the menu bar has plenty of room.
+
 If account-synced (Fluid) machines are missing from the menu:
 in Jump Desktop do File > Export, save to the Desktop, then click
 "Import Jump export from Desktop" in the menubar menu.
+
+The plugin reads this exported machine list rather than recursively
+scanning Jump Desktop's sandbox, which can block indefinitely on
+macOS 26 and prevent SwiftBar from creating the menu item.
 
 ## Build the installer
 
