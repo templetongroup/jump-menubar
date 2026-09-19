@@ -4,7 +4,7 @@ The Templeton Group
 
 Unofficial tool — not affiliated with or endorsed by Jump Desktop / p5sys.
 A macOS menubar for Jump Desktop: lists every machine with a live
-status dot — click to connect. White Jump icon, starts at login.
+status dot — click to connect. Compact white Jump icon, starts atlogin.
 
 - green = responding on the network
 - red = not responding (may still connect via Jump relay)
