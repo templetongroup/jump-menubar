@@ -40,8 +40,8 @@ with_icon=$(run_plugin "$TMP/with-icon")
   exit 1
 }
 
-grep -q '^var S = 22;$' "$BUILD_SCRIPT" || {
-  echo "icon generator is not producing a standard 22x22 template" >&2
+grep -q '^var WIDTH = 28;$' "$ROOT/geticon.jxa" || {
+  echo "icon generator is not producing a normal-width menu-bar template" >&2
   exit 1
 }
 
@@ -59,5 +59,20 @@ if grep -q 'SEARCH_DIRS=.*Library/Containers\|^[[:space:]]*"\$HOME/Library/Conta
   echo "plugin still scans the unbounded Jump Desktop sandbox" >&2
   exit 1
 fi
+
+grep -q '^  "\$HOME/JumpMenu/servers"$' "$BUILD_SCRIPT" || {
+  echo "plugin is not restricted to the imported machine cache" >&2
+  exit 1
+}
+
+grep -q '^echo "Clear Imported Machines… ' "$TMP/jumpmachines.10s.sh" || {
+  echo "plugin menu is missing the cache-clear action" >&2
+  exit 1
+}
+
+grep -q 'HELP="$HOME/Library/Application Support/Jump Menubar"' "$BUILD_SCRIPT" || {
+  echo "installer places helper scripts in the SwiftBar plugin directory" >&2
+  exit 1
+}
 
 echo "plugin header fallback tests passed"
