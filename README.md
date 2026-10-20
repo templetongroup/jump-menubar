@@ -27,6 +27,10 @@ If account-synced (Fluid) machines are missing from the menu:
 in Jump Desktop do File > Export, save to the Desktop, then click
 "Import Jump export from Desktop" in the menubar menu.
 
+Imports replace the previous cached machine list, so machines removed from
+Jump Desktop do not linger. Use "Clear Imported Machines…" to move the cached
+list to the Trash without changing anything in Jump Desktop.
+
 The plugin reads this exported machine list rather than recursively
 scanning Jump Desktop's sandbox, which can block indefinitely on
 macOS 26 and prevent SwiftBar from creating the menu item.
@@ -49,15 +53,16 @@ stapled. Bump VERSION inside build-pkg.sh for new releases.
 
 ## Layout
 
-- `build-pkg.sh` — builds the pkg; contains the menubar plugin,
-  the icon generator (traces a white template icon from the local
-  Jump Desktop app icon), the Desktop-export importer, and the
-  per-user postinstall setup, all embedded as heredocs.
+- `build-pkg.sh` — builds the pkg and embeds the plugin, Desktop-export
+  importer, and per-user postinstall setup.
+- `geticon.jxa` — makes the menu-bar template from the local Jump Desktop
+  icon, enlarging its visible shape to a normal 16-point height.
 
 Installed footprint on target Macs:
 - `/Applications/SwiftBar.app`
 - `/usr/local/jumpmenu/` (plugin source + helpers)
 - `~/Documents/SwiftBar/` (active plugin + generated icon)
+- `~/Library/Application Support/Jump Menubar/` (menu action helpers)
 - `~/Library/LaunchAgents/com.templeton.jumpmenu.plist`
 
 ## Machine status dots

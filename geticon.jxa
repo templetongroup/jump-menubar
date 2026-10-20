@@ -1,0 +1,127 @@
+ObjC.import('AppKit');
+
+// SwiftBar uses the PNG's point size. Keep the Jump shape but remove the
+// transparent padding inherited from the application's square icon.
+var SOURCE = 22;
+var WIDTH = 28;
+var HEIGHT = 22;
+var SCALE = 2;
+var PIXEL_WIDTH = WIDTH * SCALE;
+var PIXEL_HEIGHT = HEIGHT * SCALE;
+
+function bitmap(width, height) {
+  return $.NSBitmapImageRep.alloc.initWithBitmapDataPlanesPixelsWidePixelsHighBitsPerSampleSamplesPerPixelHasAlphaIsPlanarColorSpaceNameBytesPerRowBitsPerPixel(
+    null, width, height, 8, 4, true, false, $.NSCalibratedRGBColorSpace, 0, 0);
+}
+
+var workspace = $.NSWorkspace.sharedWorkspace;
+var app = workspace.URLForApplicationWithBundleIdentifier('com.p5sys.jump.mac.viewer');
+var path = (app && !app.isNil()) ? app.path : $('/Applications/Jump Desktop.app');
+var icon = workspace.iconForFile(path);
+icon.size = $.NSMakeSize(SOURCE, SOURCE);
+
+var source = bitmap(SOURCE, SOURCE);
+$.NSGraphicsContext.saveGraphicsState;
+$.NSGraphicsContext.setCurrentContext($.NSGraphicsContext.graphicsContextWithBitmapImageRep(source));
+icon.drawInRectFromRectOperationFraction(
+  $.NSMakeRect(0, 0, SOURCE, SOURCE), $.NSZeroRect,
+  $.NSCompositingOperationSourceOver, 1.0);
+$.NSGraphicsContext.restoreGraphicsState;
+
+var values = [], bright = 0;
+for (var y = 0; y < SOURCE; y++) for (var x = 0; x < SOURCE; x++) {
+  var color = source.colorAtXY(x, y).colorUsingColorSpace($.NSColorSpace.sRGBColorSpace);
+  var alpha = color.alphaComponent;
+  var luminance = alpha > 0.5
+    ? 0.299 * color.redComponent + 0.587 * color.greenComponent + 0.114 * color.blueComponent
+    : 0;
+  values.push([alpha, luminance]);
+  if (alpha > 0.5 && luminance > 0.7) bright++;
+}
+
+var useBright = bright >= 20;
+var mask = [], labels = [], index = 0;
+for (var y = 0; y < SOURCE; y++) {
+  mask[y] = [];
+  labels[y] = [];
+  for (var x = 0; x < SOURCE; x++) {
+    var value = values[index++];
+    mask[y][x] = useBright
+      ? value[0] > 0.5 && value[1] > 0.7
+      : value[0] > 0.5 && value[1] < 0.35;
+    labels[y][x] = 0;
+  }
+}
+
+var components = {}, nextLabel = 1;
+for (var y = 0; y < SOURCE; y++) for (var x = 0; x < SOURCE; x++) {
+  if (!mask[y][x] || labels[y][x]) continue;
+  var label = nextLabel++, stack = [[x, y]], count = 0;
+  labels[y][x] = label;
+  while (stack.length) {
+    var point = stack.pop();
+    count++;
+    for (var dy = -1; dy <= 1; dy++) for (var dx = -1; dx <= 1; dx++) {
+      var nx = point[0] + dx, ny = point[1] + dy;
+      if (nx >= 0 && ny >= 0 && nx < SOURCE && ny < SOURCE &&
+          mask[ny][nx] && !labels[ny][nx]) {
+        labels[ny][nx] = label;
+        stack.push([nx, ny]);
+      }
+    }
+  }
+  components[label] = count;
+}
+
+var best = 0, bestCount = 0;
+for (var key in components) {
+  if (components[key] > bestCount) {
+    bestCount = components[key];
+    best = Number(key);
+  }
+}
+if (!best) throw new Error('Jump glyph could not be found in the application icon');
+
+var minX = SOURCE, minY = SOURCE, maxX = -1, maxY = -1;
+for (var y = 0; y < SOURCE; y++) for (var x = 0; x < SOURCE; x++) {
+  if (labels[y][x] !== best) continue;
+  minX = Math.min(minX, x);
+  minY = Math.min(minY, y);
+  maxX = Math.max(maxX, x);
+  maxY = Math.max(maxY, y);
+}
+
+var sourceWidth = maxX - minX + 1;
+var sourceHeight = maxY - minY + 1;
+var factor = Math.min(26 / sourceWidth, 16 / sourceHeight);
+var targetWidth = sourceWidth * factor * SCALE;
+var targetHeight = sourceHeight * factor * SCALE;
+var left = (PIXEL_WIDTH - targetWidth) / 2;
+var top = (PIXEL_HEIGHT - targetHeight) / 2;
+
+function selected(x, y) {
+  return x >= 0 && y >= 0 && x < SOURCE && y < SOURCE && labels[y][x] === best ? 1 : 0;
+}
+
+var output = bitmap(PIXEL_WIDTH, PIXEL_HEIGHT);
+output.size = $.NSMakeSize(WIDTH, HEIGHT);
+for (var y = 0; y < PIXEL_HEIGHT; y++) for (var x = 0; x < PIXEL_WIDTH; x++) {
+  var alpha = 0;
+  if (x >= left && x < left + targetWidth && y >= top && y < top + targetHeight) {
+    var sx = minX + (x + 0.5 - left) * sourceWidth / targetWidth - 0.5;
+    var sy = minY + (y + 0.5 - top) * sourceHeight / targetHeight - 0.5;
+    var ix = Math.floor(sx), iy = Math.floor(sy);
+    var fx = sx - ix, fy = sy - iy;
+    alpha = selected(ix, iy) * (1 - fx) * (1 - fy) +
+      selected(ix + 1, iy) * fx * (1 - fy) +
+      selected(ix, iy + 1) * (1 - fx) * fy +
+      selected(ix + 1, iy + 1) * fx * fy;
+  }
+  output.setColorAtXY($.NSColor.colorWithCalibratedRedGreenBlueAlpha(0, 0, 0, alpha), x, y);
+}
+
+var png = output.representationUsingTypeProperties($.NSBitmapImageFileTypePNG, $({}));
+var destination = ObjC.unwrap($.NSHomeDirectory()) + '/Documents/SwiftBar/.jumpicon.png';
+if (!png.writeToFileAtomically($(destination), true)) {
+  throw new Error('Could not write ' + destination);
+}

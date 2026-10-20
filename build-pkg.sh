@@ -2,7 +2,7 @@
 # build-pkg.sh — builds signed + notarized Jump Menubar installer (Templeton Group)
 set -e
 
-VERSION="1.2.2"
+VERSION="1.2.3"
 IDENTIFIER="com.templeton.jumpmenu"
 NOTARY_PROFILE="templeton-notary"
 
@@ -47,7 +47,7 @@ echo "---"
 # The app sandbox can block directory enumeration indefinitely on macOS 26.
 # The Jump export is small, stable, and is the supported machine source.
 SEARCH_DIRS=(
-  "$HOME/JumpMenu"
+  "$HOME/JumpMenu/servers"
 )
 MAP="$HOME/JumpMenu/tailscale-names.txt"
 
@@ -179,7 +179,8 @@ else
 fi
 
 echo "---"
-echo "Import Jump export from Desktop | bash=/bin/bash param1=/usr/local/jumpmenu/import-export.sh terminal=false refresh=true"
+echo "Import Jump export from Desktop | bash=/bin/bash param1=\"$HOME/Library/Application Support/Jump Menubar/import-export.sh\" param2=--import terminal=false refresh=true"
+echo "Clear Imported Machines… | bash=/bin/bash param1=\"$HOME/Library/Application Support/Jump Menubar/clear-cache.sh\" param2=--clear terminal=false refresh=true"
 echo "Open Jump Desktop | bash=/usr/bin/open param1=-a param2=\"Jump Desktop\" terminal=false"
 echo "Refresh | refresh=true"
 PLUGIN_EOF
@@ -187,95 +188,87 @@ chmod +x "$SUPPORT/jumpmachines.10s.sh"
 
 cat > "$SUPPORT/import-export.sh" <<'IMPORT_EOF'
 #!/bin/bash
+[ "${1:-}" = "--import" ] || exit 0
 jdz=$(ls -t "$HOME/Desktop"/*.jdz 2>/dev/null | head -1)
 if [ -n "$jdz" ]; then
-  mkdir -p "$HOME/JumpMenu"
-  unzip -o "$jdz" -d "$HOME/JumpMenu" >/dev/null
-  osascript -e 'display notification "Machines imported. Menu updates in a few seconds." with title "Jump Menubar"'
+  tmp=$(mktemp -d)
+  trap 'rm -rf "$tmp"' EXIT
+  if ! unzip -q "$jdz" -d "$tmp" || [ ! -d "$tmp/servers" ]; then
+    osascript -e 'display notification "The newest Jump export could not be read." with title "Jump Menubar"' 2>/dev/null || true
+    exit 1
+  fi
+
+  mkdir -p "$HOME/JumpMenu" "$HOME/.Trash"
+  destination="$HOME/JumpMenu/servers"
+  backup=""
+  if [ -d "$destination" ]; then
+    backup="$HOME/.Trash/JumpMenu-servers-before-import-$(date +%Y%m%d-%H%M%S)-$$"
+    mv "$destination" "$backup"
+  fi
+  if ! mv "$tmp/servers" "$destination"; then
+    [ -n "$backup" ] && [ -d "$backup" ] && mv "$backup" "$destination"
+    osascript -e 'display notification "Import failed; the previous machine list was restored." with title "Jump Menubar"' 2>/dev/null || true
+    exit 1
+  fi
+  if [ "${JUMPMENU_QUIET:-0}" != "1" ]; then
+    osascript -e 'display notification "Machines replaced from the latest export. Menu updates in a few seconds." with title "Jump Menubar"' 2>/dev/null || true
+  fi
 else
-  osascript -e 'display notification "No export found. In Jump Desktop: File > Export, save to Desktop, then click Import again." with title "Jump Menubar"'
+  osascript -e 'display notification "No export found. In Jump Desktop: File > Export, save to Desktop, then click Import again." with title "Jump Menubar"' 2>/dev/null || true
 fi
 IMPORT_EOF
 chmod +x "$SUPPORT/import-export.sh"
 
-cat > "$SUPPORT/geticon.jxa" <<'JXA_EOF'
-ObjC.import('AppKit');
-var ws = $.NSWorkspace.sharedWorkspace;
-var app = ws.URLForApplicationWithBundleIdentifier('com.p5sys.jump.mac.viewer');
-var path = (app && !app.isNil()) ? app.path : $('/Applications/Jump Desktop.app');
-var icon = ws.iconForFile(path);
-// SwiftBar renders bitmap pixels at their intrinsic point size. Generate a
-// standard menu-bar-sized template instead of relying on unsupported
-// width/height output parameters.
-var S = 22;
-icon.size = $.NSMakeSize(S, S);
-function newRep() {
-  return $.NSBitmapImageRep.alloc.initWithBitmapDataPlanesPixelsWidePixelsHighBitsPerSampleSamplesPerPixelHasAlphaIsPlanarColorSpaceNameBytesPerRowBitsPerPixel(null, S, S, 8, 4, true, false, $.NSCalibratedRGBColorSpace, 0, 0);
-}
-var rep = newRep();
-$.NSGraphicsContext.saveGraphicsState;
-$.NSGraphicsContext.setCurrentContext($.NSGraphicsContext.graphicsContextWithBitmapImageRep(rep));
-icon.drawInRectFromRectOperationFraction($.NSMakeRect(0,0,S,S), $.NSZeroRect, $.NSCompositingOperationSourceOver, 1.0);
-$.NSGraphicsContext.restoreGraphicsState;
-var vals = [], bright = 0;
-for (var y=0; y<S; y++) for (var x=0; x<S; x++) {
-  var c = rep.colorAtXY(x,y).colorUsingColorSpace($.NSColorSpace.sRGBColorSpace);
-  var a = c.alphaComponent, b = 0;
-  if (a > 0.5) b = 0.299*c.redComponent + 0.587*c.greenComponent + 0.114*c.blueComponent;
-  vals.push([a,b]);
-  if (a>0.5 && b>0.7) bright++;
-}
-var useBright = bright >= 20;
-var mask = [];
-var i=0;
-for (var y=0; y<S; y++) { mask.push([]); for (var x=0; x<S; x++) {
-  var a=vals[i][0], b=vals[i][1]; i++;
-  mask[y].push(useBright ? (a>0.5 && b>0.7) : (a>0.5 && b<0.35));
-}}
-var label = [], comps = {}, next = 1;
-for (var y=0; y<S; y++) { label.push([]); for (var x=0; x<S; x++) label[y].push(0); }
-for (var y=0; y<S; y++) for (var x=0; x<S; x++) {
-  if (mask[y][x] && label[y][x] === 0) {
-    var id = next++, stack = [[x,y]], count = 0;
-    label[y][x] = id;
-    while (stack.length) {
-      var p = stack.pop(); count++;
-      var px = p[0], py = p[1];
-      for (var dy=-1; dy<=1; dy++) for (var dx=-1; dx<=1; dx++) {
-        var nx = px+dx, ny = py+dy;
-        if (nx>=0 && ny>=0 && nx<S && ny<S && mask[ny][nx] && label[ny][nx]===0) {
-          label[ny][nx] = id; stack.push([nx,ny]);
-        }
-      }
-    }
-    comps[id] = count;
-  }
-}
-var best = 0, bestCount = 0;
-for (var k in comps) if (comps[k] > bestCount) { bestCount = comps[k]; best = parseInt(k); }
-var out = newRep();
-var black = $.NSColor.colorWithCalibratedRedGreenBlueAlpha(0,0,0,1);
-var clear = $.NSColor.colorWithCalibratedRedGreenBlueAlpha(0,0,0,0);
-for (var y=0; y<S; y++) for (var x=0; x<S; x++) {
-  out.setColorAtXY(label[y][x] === best ? black : clear, x, y);
-}
-var png = out.representationUsingTypeProperties($.NSBitmapImageFileTypePNG, $({}));
-png.writeToFileAtomically($(ObjC.unwrap($.NSHomeDirectory()) + '/Documents/SwiftBar/.jumpicon.png'), true);
-JXA_EOF
+cat > "$SUPPORT/clear-cache.sh" <<'CLEAR_EOF'
+#!/bin/bash
+[ "${1:-}" = "--clear" ] || exit 0
+cache="$HOME/JumpMenu/servers"
+count=$(find "$cache" -type f -name "*.jump" 2>/dev/null | wc -l | tr -d ' ')
+if [ "${count:-0}" -eq 0 ]; then
+  osascript -e 'display notification "There are no imported machines to clear." with title "Jump Menubar"' 2>/dev/null || true
+  exit 0
+fi
+
+if [ "${JUMPMENU_SKIP_CONFIRM:-0}" != "1" ]; then
+  answer=$(osascript <<OSA 2>/dev/null
+display dialog "Remove $count imported machine(s) from Jump Menubar?\n\nThis does not delete anything from Jump Desktop. The cached files will be moved to the Trash and can be restored." buttons {"Cancel", "Clear Imported Machines"} default button "Clear Imported Machines" cancel button "Cancel" with title "Jump Menubar"
+OSA
+  ) || exit 0
+  case "$answer" in
+    *"Clear Imported Machines"*) ;;
+    *) exit 0 ;;
+  esac
+fi
+
+mkdir -p "$HOME/JumpMenu" "$HOME/.Trash"
+backup="$HOME/.Trash/JumpMenu-servers-cleared-$(date +%Y%m%d-%H%M%S)-$$"
+mv "$cache" "$backup"
+mkdir -p "$cache"
+osascript -e 'display notification "Imported machines cleared. Export from Jump Desktop and import again when ready." with title "Jump Menubar"' 2>/dev/null || true
+CLEAR_EOF
+chmod +x "$SUPPORT/clear-cache.sh"
+
+cp "$(dirname "$0")/geticon.jxa" "$SUPPORT/geticon.jxa"
 
 cat > "$SUPPORT/user-setup.sh" <<'USER_EOF'
 #!/bin/bash
 SRC="/usr/local/jumpmenu"
 PLUG="$HOME/Documents/SwiftBar"
-mkdir -p "$PLUG"
+HELP="$HOME/Library/Application Support/Jump Menubar"
+mkdir -p "$PLUG" "$HELP"
 cp "$SRC/jumpmachines.10s.sh" "$PLUG/"
-chmod +x "$PLUG/jumpmachines.10s.sh"
+for helper in import-export.sh clear-cache.sh; do
+  if [ -f "$PLUG/$helper" ]; then
+    mv "$PLUG/$helper" "$HELP/$helper"
+  fi
+done
+cp "$SRC/import-export.sh" "$SRC/clear-cache.sh" "$HELP/"
+chmod +x "$PLUG/jumpmachines.10s.sh" "$HELP/import-export.sh" "$HELP/clear-cache.sh"
 /usr/bin/osascript -l JavaScript "$SRC/geticon.jxa" >/dev/null 2>&1 || true
 defaults write com.ameba.SwiftBar PluginDirectory -string "$PLUG"
 jdz=$(ls -t "$HOME/Desktop"/*.jdz 2>/dev/null | head -1)
 if [ -n "$jdz" ]; then
-  mkdir -p "$HOME/JumpMenu"
-  unzip -o "$jdz" -d "$HOME/JumpMenu" >/dev/null 2>&1
+  JUMPMENU_QUIET=1 "$SRC/import-export.sh" --import || true
 fi
 mkdir -p "$HOME/Library/LaunchAgents"
 cat > "$HOME/Library/LaunchAgents/com.templeton.jumpmenu.plist" <<'LA'
